@@ -117,7 +117,7 @@ def test_export_workspace_cpa_session_from_browser_switches_workspace_and_saves(
     page = FakePage()
     result = export_workspace_cpa_session_from_browser(
         page,
-        workspace_id="d1869eec-4d2d-4fce-967f-a1a6b906d51e",
+        workspace_id="631e1603-06cf-4f0b-b79b-d09fbfcfe98d",
         output_dir=tmp_path,
         now=datetime(2026, 7, 1, 1, 2, 3, tzinfo=timezone.utc),
     )
@@ -127,7 +127,7 @@ def test_export_workspace_cpa_session_from_browser_switches_workspace_and_saves(
         "https://chatgpt.com/api/auth/session",
     ]
     workspace_args = [arg for arg in page.evaluate_args if isinstance(arg, dict) and arg.get("workspaceId")]
-    assert workspace_args[0]["workspaceId"] == "d1869eec-4d2d-4fce-967f-a1a6b906d51e"
+    assert workspace_args[0]["workspaceId"] == "631e1603-06cf-4f0b-b79b-d09fbfcfe98d"
     assert result["ok"] is True
     assert result["account_id"] == "workspace-account"
     assert result["email"] == "member@example.com"

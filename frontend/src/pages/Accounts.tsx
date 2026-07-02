@@ -33,7 +33,7 @@ const BROWSER_MODE_OPTIONS = [
 ]
 
 const ACCOUNT_TOOL_BUTTON_CLASS = 'h-8 shrink-0 whitespace-nowrap bg-transparent'
-const DEFAULT_CHATGPT_WORKSPACE_IDS = 'd1869eec-4d2d-4fce-967f-a1a6b906d51e'
+const DEFAULT_CHATGPT_WORKSPACE_IDS = '631e1603-06cf-4f0b-b79b-d09fbfcfe98d'
 
 function getAccountOverview(acc: any) {
   return acc?.overview || {}

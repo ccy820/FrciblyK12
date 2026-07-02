@@ -10,7 +10,7 @@ from .cpa_session import export_workspace_cpa_session_from_browser
 from .constants import CHATGPT_APP
 
 
-DEFAULT_WORKSPACE_IDS = "d1869eec-4d2d-4fce-967f-a1a6b906d51e"
+DEFAULT_WORKSPACE_IDS = "631e1603-06cf-4f0b-b79b-d09fbfcfe98d"
 
 
 def parse_workspace_ids(raw: Any) -> list[str]:

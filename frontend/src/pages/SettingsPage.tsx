@@ -481,32 +481,6 @@ function AboutTab() {
               </a>
             }
           />
-          <InfoRow
-            label={t("settings.qqGroup")}
-            value={
-              <a
-                href="https://qm.qq.com/q/VfehONV8cQ"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
-              >
-                {t("settings.qqGroup.join")}
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path
-                    d="M6 3.5h6.5V10M12 4L4 12"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </a>
-            }
-          />
         </div>
       </SettingGroup>
     </div>

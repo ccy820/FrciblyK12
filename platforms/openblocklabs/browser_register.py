@@ -10,6 +10,14 @@ DASHBOARD = "https://dashboard.openblocklabs.com"
 CLIENT_ID = "client_01K8YDZSSKDMK8GYTEHBAW4N4S"
 
 
+def _new_camoufox_page(browser):
+    try:
+        context = browser.new_context(no_viewport=True)
+        return context.new_page()
+    except TypeError:
+        return browser.new_page()
+
+
 def _generate_password() -> str:
     return (
         ''.join(random.choices(string.ascii_uppercase, k=2))
@@ -497,7 +505,7 @@ class OpenBlockLabsBrowserRegister:
         last_name = ''.join(random.choices(string.ascii_lowercase, k=5)).capitalize()
 
         with Camoufox(**launch_opts) as browser:
-            page = browser.new_page()
+            page = _new_camoufox_page(browser)
             page.add_init_script("""
 (function() {
     var screenX = Math.floor(Math.random() * (1200 - 800 + 1)) + 800;

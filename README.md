@@ -15,11 +15,6 @@ aBaiAutoplus 是一个以 ChatGPT free 账号注册、管理和本地配置为�
 - Cursor、Kiro、ChatGPT 等桌面环境状态
 - 手动刷新当前统计数据
 
-### QQ群
-
-点击链接加入群聊【GPT PLUS交流群aBaiAutoplus】：https://qm.qq.com/q/vbHPiYpqUg
-![QQ群](assets/screenshots/QQ群交流.jpg)
-
 ### chatgpt free
 
 用于管理 ChatGPT free 账号：

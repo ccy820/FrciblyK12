@@ -27,6 +27,18 @@ from .constants import (
 CAMOUFOX_VISIBLE_WINDOW_SIZE = (1280, 720)
 
 
+def _new_browser_page(browser, backend_config: BrowserBackendConfig, log: Callable[[str], None]):
+    if backend_config.is_camoufox:
+        try:
+            context = browser.new_context(no_viewport=True)
+            return context.new_page()
+        except TypeError:
+            pass
+        except Exception as exc:
+            log(f"Camoufox no_viewport context 创建失败，回退默认 new_page: {exc}")
+    return browser.new_page()
+
+
 def _apply_camoufox_visible_window_limit(
     launch_opts: dict,
     backend_config: BrowserBackendConfig,
@@ -4724,7 +4736,7 @@ class ChatGPTBrowserRegister:
                 launch_opts["geoip"] = True
 
         with self._open_browser(launch_opts) as browser:
-            page = browser.new_page()
+            page = _new_browser_page(browser, self.backend_config, self.log)
             self.log("启动浏览器上下文注册状态机")
             final_state = _browser_registration_flow(
                 page,
@@ -4778,7 +4790,7 @@ class ChatGPTBrowserRegister:
                 launch_opts["proxy"] = proxy
         try:
             with self._open_browser(launch_opts) as browser:
-                page = browser.new_page()
+                page = _new_browser_page(browser, self.backend_config, self.log)
                 self.log("  全新浏览器 OAuth 开始...")
                 result = _do_codex_oauth(
                     page, {}, email, password,
