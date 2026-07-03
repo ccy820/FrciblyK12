@@ -209,30 +209,55 @@ class ChatGPTPlatform(BasePlatform):
                     if should_report and proxy:
                         proxy_pool.report_success(proxy)
                     status = details.get("status")
-                    # 把订阅状态同步映射成前端能用的 plan_state / chips
-                    # 来源（避免老 chips 还带 "Plus" 但实际已 free）。
+                    # 把订阅状态同步映射成前端能用的 plan_state / chips，
+                    # 以本次检测结果为准，避免老 chips 还带旧套餐。
+                    detected_chips = [
+                        str(chip).strip()
+                        for chip in (details.get("chips") or [])
+                        if str(chip or "").strip()
+                    ]
                     if status == "plus":
                         plan_state = "subscribed"
-                        chips = ["Plus"]
+                        chips = detected_chips or ["Plus"]
+                        default_plan_name = status
                     elif status == "team":
                         plan_state = "subscribed"
-                        chips = ["Team"]
+                        chips = detected_chips or ["Team"]
+                        default_plan_name = status
+                    elif status == "workspace":
+                        plan_state = "subscribed"
+                        chips = detected_chips or ["K12", "Workspace"]
+                        default_plan_name = "K12 Workspace"
                     elif status == "free":
                         plan_state = "free"
-                        chips = ["Free"]
+                        chips = detected_chips or ["Free"]
+                        default_plan_name = status
                     elif status in ("expired", "invalid", "banned"):
                         plan_state = "expired"
                         chips = []
+                        default_plan_name = str(status or "expired")
                     else:
                         plan_state = "unknown"
                         chips = []
+                        default_plan_name = str(status or "unknown")
+                    plan_name = str(details.get("plan_name") or default_plan_name or status or "").strip()
                     overview = {
                         "plan": status,
-                        "plan_name": status,
+                        "plan_name": plan_name,
+                        "membership_type": str(details.get("membership_type") or plan_name or status or "").strip(),
                         "plan_state": plan_state,
                         "chips": chips,
                         "check_source": details.get("source"),
                     }
+                    for key in (
+                        "workspace_id",
+                        "workspace_name",
+                        "workspace_plan_type",
+                        "status_source_key",
+                        "chatgpt_account_id",
+                    ):
+                        if details.get(key) not in (None, ""):
+                            overview[key] = details.get(key)
                     if isinstance(details.get("usage"), dict):
                         overview["chatgpt_usage"] = details["usage"]
                     self._last_check_overview = overview

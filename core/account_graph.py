@@ -133,6 +133,12 @@ def _normalize_plan_state(value: Any) -> str:
         "business",
         "enterprise",
         "member",
+        "workspace",
+        "teacher",
+        "teachers",
+        "education",
+        "k12",
+        "school",
     )
     if any(token in raw for token in subscribed_hints):
         return "subscribed"

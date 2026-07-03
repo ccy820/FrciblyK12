@@ -29,7 +29,7 @@ def refresh_plan(
     platform: str = "",
     body: _RefreshPlanBody | None = None,
 ):
-    """**同步**并发批量刷新订阅状态（plus / free / expired）。
+    """**同步**并发批量刷新订阅状态（plus / workspace / free / expired）。
 
     参考 router-for-me/CLIProxyAPI ``/v0/management/api-call`` 思路：
     直接用账号 access_token 调 ``chatgpt.com/backend-api/me`` +

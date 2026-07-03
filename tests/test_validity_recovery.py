@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 
 from sqlmodel import Session, select
@@ -12,6 +13,14 @@ from core.lifecycle import check_accounts_validity
 from core.proxy_pool import proxy_pool
 from platforms.chatgpt import payment
 from platforms.chatgpt.plugin import ChatGPTPlatform
+
+
+def _jwt(payload: dict) -> str:
+    def enc(value: dict) -> str:
+        raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    return f"{enc({'alg': 'none', 'typ': 'JWT'})}.{enc(payload)}."
 
 
 class _AlwaysValidPlatform:
@@ -120,6 +129,110 @@ def test_chatgpt_subscription_status_falls_back_to_wham_usage(monkeypatch):
     assert status == "free"
     assert captured_headers["Authorization"] == "Bearer token"
     assert captured_headers["Chatgpt-Account-Id"] == "acct-123"
+
+
+def test_chatgpt_subscription_status_detects_k12_workspace_from_me(monkeypatch):
+    captured_headers: dict[str, str] = {}
+
+    class _Resp:
+        def __init__(self, data):
+            self._data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._data
+
+    def _fake_get(url, **kwargs):
+        captured_headers[url] = dict(kwargs.get("headers") or {})
+        if url.endswith("/backend-api/me"):
+            return _Resp(
+                {
+                    "plan_type": "free",
+                    "orgs": {
+                        "data": [
+                            {
+                                "id": "631e1603-06cf-4f0b-b79b-d09fbfcfe98d",
+                                "name": "schools.nyc.gov Workspace #82254",
+                                "settings": {"workspace_plan_type": "chatgpt_for_teachers"},
+                            }
+                        ]
+                    },
+                }
+            )
+        return _Resp({"plan_type": "free"})
+
+    monkeypatch.setattr(payment.cffi_requests, "get", _fake_get)
+    account = type(
+        "AccountStub",
+        (),
+        {
+            "access_token": "token",
+            "cookies": "",
+            "id_token": _jwt(
+                {
+                    "https://api.openai.com/auth": {
+                        "chatgpt_account_id": "acct-workspace",
+                        "chatgpt_plan_type": "workspace",
+                    }
+                }
+            ),
+            "extra": {},
+        },
+    )()
+
+    details = payment.fetch_subscription_status_details(account)
+
+    assert details["status"] == "workspace"
+    assert details["plan_name"] == "ChatGPT for Teachers"
+    assert details["workspace_id"] == "631e1603-06cf-4f0b-b79b-d09fbfcfe98d"
+    assert "K12" in details["chips"]
+    assert "Teachers" in details["chips"]
+    assert details["chatgpt_account_id"] == "acct-workspace"
+    assert captured_headers["https://chatgpt.com/backend-api/me"]["Chatgpt-Account-Id"] == "acct-workspace"
+
+
+def test_chatgpt_check_valid_marks_k12_workspace_subscribed(monkeypatch):
+    def _fake_status(account, proxy=None):
+        return {
+            "status": "workspace",
+            "source": "backend-api/me",
+            "plan_name": "ChatGPT for Teachers",
+            "membership_type": "workspace",
+            "workspace_id": "631e1603-06cf-4f0b-b79b-d09fbfcfe98d",
+            "workspace_name": "schools.nyc.gov Workspace #82254",
+            "workspace_plan_type": "chatgpt_for_teachers",
+            "chips": ["K12", "Workspace", "Teachers"],
+            "usage": {"plan_type": "free"},
+        }
+
+    monkeypatch.setattr(payment, "fetch_subscription_status_details", _fake_status)
+    monkeypatch.setattr(proxy_pool, "get_next", lambda region="": None)
+
+    plugin = ChatGPTPlatform.__new__(ChatGPTPlatform)
+    plugin.config = RegisterConfig()
+    plugin.mailbox = None
+    account = type(
+        "AccountStub",
+        (),
+        {
+            "token": "token",
+            "region": "",
+            "extra": {"access_token": "token", "id_token": "", "cookies": ""},
+        },
+    )()
+
+    assert plugin.check_valid(account) is True
+    overview = plugin.get_last_check_overview()
+    assert overview["plan"] == "workspace"
+    assert overview["plan_state"] == "subscribed"
+    assert overview["plan_name"] == "ChatGPT for Teachers"
+    assert overview["membership_type"] == "workspace"
+    assert overview["workspace_id"] == "631e1603-06cf-4f0b-b79b-d09fbfcfe98d"
+    assert overview["workspace_plan_type"] == "chatgpt_for_teachers"
+    assert overview["chips"] == ["K12", "Workspace", "Teachers"]
+    assert overview["chatgpt_usage"] == {"plan_type": "free"}
 
 
 def test_chatgpt_check_valid_uses_proxy_pool_before_direct(monkeypatch):

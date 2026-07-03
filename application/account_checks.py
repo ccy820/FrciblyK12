@@ -39,7 +39,7 @@ class AccountChecksService:
         max_workers: int = 20,
         timeout_seconds: int = 120,
     ) -> dict[str, Any]:
-        """**同步**并发批量刷新账号订阅状态（plus / free / expired）。
+        """**同步**并发批量刷新账号订阅状态（plus / workspace / free / expired）。
 
         参考 router-for-me/CLIProxyAPI 的 ``/v0/management/api-call`` 思路：
         直接用账号 access_token 打 ``chatgpt.com/backend-api/me`` +

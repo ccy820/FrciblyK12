@@ -459,12 +459,12 @@ function AboutTab() {
             label="GitHub"
             value={
               <a
-                href="https://github.com/asz798838958/aBaiAutoplus"
+                href="https://github.com/ccy820/FrciblyK12"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
               >
-                github.com/asz798838958/aBaiAutoplus
+                github.com/ccy820/FrciblyK12
                 <svg
                   className="h-3.5 w-3.5"
                   viewBox="0 0 16 16"

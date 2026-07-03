@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -17,7 +18,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from curl_cffi import requests as cffi_requests
@@ -571,6 +572,58 @@ def _extract_checkout_url(data: dict) -> str:
     return ""
 
 
+def _parse_token_payload(token: Any) -> dict[str, Any]:
+    if isinstance(token, dict):
+        return token
+    text = str(token or "").strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    parts = text.split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(payload.encode("ascii"))
+        parsed = json.loads(raw.decode("utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _openai_auth_claims(payload: dict[str, Any]) -> dict[str, Any]:
+    claims = payload.get("https://api.openai.com/auth")
+    return claims if isinstance(claims, dict) else payload
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if value not in (None, "") and not isinstance(value, (dict, list, tuple, set)):
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
 def _extract_chatgpt_account_id(account) -> str:
     direct_candidates = [
         getattr(account, "chatgpt_account_id", ""),
@@ -588,51 +641,310 @@ def _extract_chatgpt_account_id(account) -> str:
         if text:
             return text
 
-    id_token = getattr(account, "id_token", "") or (extra.get("id_token") if isinstance(extra, dict) else "")
-    parsed = None
-    if isinstance(id_token, dict):
-        parsed = id_token
-    elif isinstance(id_token, str) and id_token.strip().startswith("{"):
-        try:
-            parsed = json.loads(id_token)
-        except Exception:
-            parsed = None
-    if isinstance(parsed, dict):
+    token_candidates = [
+        getattr(account, "id_token", ""),
+        getattr(account, "access_token", ""),
+    ]
+    if isinstance(extra, dict):
+        token_candidates.extend([extra.get("id_token", ""), extra.get("access_token", "")])
+
+    for token in token_candidates:
+        parsed = _parse_token_payload(token)
+        if not isinstance(parsed, dict):
+            continue
+        claims = _openai_auth_claims(parsed)
         for key in ("chatgpt_account_id", "chatgptAccountId", "account_id"):
-            value = str(parsed.get(key) or "").strip()
+            value = str(claims.get(key) or parsed.get(key) or "").strip()
             if value:
                 return value
     return ""
 
 
-def _normalize_subscription_plan(plan: str) -> str:
+_WORKSPACE_PLAN_TOKENS = (
+    "k12",
+    "teacher",
+    "teachers",
+    "education",
+    "edu",
+    "school",
+    "student",
+)
+_WORKSPACE_TEXT_TOKENS = ("workspace", *_WORKSPACE_PLAN_TOKENS)
+_TEAM_PLAN_TOKENS = ("team", "enterprise", "business")
+_PLUS_PLAN_TOKENS = ("plus", "pro", "premium", "paid")
+_EXPIRED_PLAN_TOKENS = ("expired", "cancelled", "canceled", "inactive", "ended")
+
+
+def _normalize_subscription_plan(plan: Any) -> str:
     raw = str(plan or "").strip().lower()
     if not raw:
         return "free"
-    if any(token in raw for token in ("team", "enterprise", "business")):
+    if any(token in raw for token in _EXPIRED_PLAN_TOKENS):
+        return "expired"
+    if raw == "workspace" or raw.startswith("workspace_") or raw.endswith("_workspace"):
+        return "workspace"
+    if any(token in raw for token in _WORKSPACE_PLAN_TOKENS):
+        return "workspace"
+    if any(token in raw for token in _TEAM_PLAN_TOKENS):
         return "team"
-    if any(token in raw for token in ("plus", "pro", "premium", "paid")):
+    if any(token in raw for token in _PLUS_PLAN_TOKENS):
         return "plus"
     return "free"
 
 
-def _subscription_status_from_me(data: dict) -> str:
-    plan = data.get("plan_type") or ""
-    normalized = _normalize_subscription_plan(plan)
-    if normalized != "free":
-        return normalized
+def _plan_display_name(status: str, raw: Any = "", workspace_name: str = "") -> str:
+    raw_text = str(raw or "").strip()
+    text = f"{raw_text} {workspace_name}".strip().lower()
+    if status == "workspace":
+        if "teacher" in text:
+            return "ChatGPT for Teachers"
+        return "K12 Workspace"
+    if status == "team":
+        return "Team"
+    if status == "plus":
+        return "Plus"
+    if status == "expired":
+        return "Expired"
+    return "Free"
 
-    orgs = data.get("orgs", {}).get("data", [])
-    for org in orgs:
-        settings_ = org.get("settings", {})
-        normalized = _normalize_subscription_plan(settings_.get("workspace_plan_type"))
-        if normalized != "free":
-            return normalized
-    return "free"
+
+def _plan_chips(status: str, raw: Any = "", workspace_name: str = "") -> list[str]:
+    chips: list[str] = []
+    if status == "workspace":
+        chips.extend(["K12", "Workspace"])
+        text = f"{raw or ''} {workspace_name or ''}".lower()
+        if "teacher" in text:
+            chips.append("Teachers")
+    elif status == "team":
+        chips.append("Team")
+    elif status == "plus":
+        chips.append("Plus")
+    elif status == "free":
+        chips.append("Free")
+    seen: set[str] = set()
+    result: list[str] = []
+    for chip in chips:
+        if chip and chip not in seen:
+            seen.add(chip)
+            result.append(chip)
+    return result
+
+
+def _candidate_details(
+    status: str,
+    *,
+    raw: Any = "",
+    source_key: str = "",
+    workspace: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    workspace = workspace or {}
+    workspace_name = _first_text(
+        workspace.get("name"),
+        workspace.get("display_name"),
+        workspace.get("title"),
+        workspace.get("workspace_name"),
+    )
+    workspace_id = _first_text(workspace.get("id"), workspace.get("workspace_id"), workspace.get("workspaceId"))
+    display_name = _plan_display_name(status, raw, workspace_name)
+    details: dict[str, Any] = {
+        "status": status,
+        "plan_name": display_name,
+        "membership_type": _first_text(raw, display_name),
+        "chips": _plan_chips(status, raw, workspace_name),
+        "status_source_key": source_key,
+    }
+    if workspace_id:
+        details["workspace_id"] = workspace_id
+    if workspace_name:
+        details["workspace_name"] = workspace_name
+    if raw not in (None, ""):
+        details["workspace_plan_type" if workspace else "plan_type"] = str(raw).strip()
+    return details
+
+
+def _pick_subscription_details(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    priority = {
+        "workspace": 70,
+        "team": 60,
+        "plus": 50,
+        "expired": 40,
+        "free": 10,
+        "unknown": 0,
+        "invalid": -10,
+        "banned": -20,
+    }
+    usable = [item for item in candidates if isinstance(item, dict) and item.get("status")]
+    if not usable:
+        return _candidate_details("free")
+    return max(usable, key=lambda item: priority.get(str(item.get("status") or ""), 0))
+
+
+def _workspace_candidates_from_entry(entry: dict[str, Any], *, source_key: str) -> list[dict[str, Any]]:
+    settings = _as_dict(entry.get("settings"))
+    account_plan = _as_dict(entry.get("account_plan") or entry.get("billing_plan"))
+    raw_plan = _first_text(
+        entry.get("workspace_plan_type"),
+        settings.get("workspace_plan_type"),
+        entry.get("plan_type"),
+        entry.get("plan"),
+        entry.get("type"),
+        account_plan.get("subscription_plan"),
+        account_plan.get("plan_type"),
+        account_plan.get("plan_name"),
+    )
+    workspace_name = _first_text(
+        entry.get("name"),
+        entry.get("display_name"),
+        entry.get("title"),
+        entry.get("workspace_name"),
+    )
+    status = _normalize_subscription_plan(raw_plan)
+    if status == "free":
+        text = f"{raw_plan} {workspace_name}".lower()
+        if any(token in text for token in _WORKSPACE_TEXT_TOKENS):
+            status = "workspace"
+    if status == "free" and not raw_plan and account_plan.get("is_paid_subscription_active"):
+        status = "team"
+        raw_plan = "paid"
+    if status == "free" and not raw_plan and not workspace_name:
+        return []
+    return [_candidate_details(status, raw=raw_plan, source_key=source_key, workspace=entry)]
+
+
+def _iter_workspace_entries(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    entries: list[tuple[str, dict[str, Any]]] = []
+    for key in ("orgs", "workspaces", "organizations", "accounts"):
+        container = data.get(key)
+        values: list[Any]
+        if isinstance(container, dict):
+            values = _as_list(container.get("data") or container.get("items") or container.get("results"))
+        else:
+            values = _as_list(container)
+        for item in values:
+            if isinstance(item, dict):
+                entries.append((key, item))
+    return entries
+
+
+def _subscription_details_from_me(data: dict[str, Any]) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    plan = _first_text(data.get("plan_type"), data.get("membership_type"), data.get("individual_membership_type"))
+    candidates.append(_candidate_details(_normalize_subscription_plan(plan), raw=plan, source_key="me.plan_type"))
+
+    account_plan = _as_dict(data.get("account_plan"))
+    raw_account_plan = _first_text(
+        account_plan.get("subscription_plan"),
+        account_plan.get("plan_type"),
+        account_plan.get("plan_name"),
+        account_plan.get("name"),
+    )
+    if raw_account_plan:
+        candidates.append(
+            _candidate_details(
+                _normalize_subscription_plan(raw_account_plan),
+                raw=raw_account_plan,
+                source_key="me.account_plan",
+            )
+        )
+    elif account_plan.get("is_paid_subscription_active"):
+        candidates.append(_candidate_details("plus", raw="paid", source_key="me.account_plan.active"))
+
+    settings = _as_dict(data.get("settings"))
+    workspace_plan = _first_text(settings.get("workspace_plan_type"), data.get("workspace_plan_type"))
+    if workspace_plan:
+        candidates.append(
+            _candidate_details(
+                _normalize_subscription_plan(workspace_plan),
+                raw=workspace_plan,
+                source_key="me.settings.workspace_plan_type",
+            )
+        )
+
+    for key, entry in _iter_workspace_entries(data):
+        candidates.extend(_workspace_candidates_from_entry(entry, source_key=f"me.{key}"))
+
+    return _pick_subscription_details(candidates)
+
+
+def _subscription_status_from_me(data: dict) -> str:
+    return _subscription_details_from_me(data).get("status", "free")
+
+
+def _subscription_details_from_usage(data: dict[str, Any]) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    plan = _first_text(data.get("plan_type"), data.get("membership_type"), data.get("workspace_plan_type"))
+    candidates.append(_candidate_details(_normalize_subscription_plan(plan), raw=plan, source_key="usage.plan_type"))
+    account_plan = _as_dict(data.get("account_plan"))
+    raw_account_plan = _first_text(
+        account_plan.get("subscription_plan"),
+        account_plan.get("plan_type"),
+        account_plan.get("plan_name"),
+    )
+    if raw_account_plan:
+        candidates.append(
+            _candidate_details(
+                _normalize_subscription_plan(raw_account_plan),
+                raw=raw_account_plan,
+                source_key="usage.account_plan",
+            )
+        )
+    for key, entry in _iter_workspace_entries(data):
+        candidates.extend(_workspace_candidates_from_entry(entry, source_key=f"usage.{key}"))
+    return _pick_subscription_details(candidates)
 
 
 def _subscription_status_from_usage(data: dict) -> str:
-    return _normalize_subscription_plan(data.get("plan_type"))
+    return _subscription_details_from_usage(data).get("status", "free")
+
+
+def _subscription_details_from_account_tokens(account) -> dict[str, Any]:
+    extra = getattr(account, "extra", {}) or {}
+    candidates: list[dict[str, Any]] = []
+    if isinstance(extra, dict):
+        overview = _as_dict(extra.get("account_overview"))
+        raw_overview_plan = _first_text(
+            extra.get("chatgpt_plan_type"),
+            extra.get("plan_type"),
+            extra.get("membership_type"),
+            overview.get("chatgpt_plan_type"),
+            overview.get("plan_type"),
+            overview.get("membership_type"),
+            overview.get("plan_name"),
+        )
+        if raw_overview_plan:
+            candidates.append(
+                _candidate_details(
+                    _normalize_subscription_plan(raw_overview_plan),
+                    raw=raw_overview_plan,
+                    source_key="account.extra",
+                    workspace={
+                        "id": _first_text(extra.get("workspace_id"), overview.get("workspace_id")),
+                        "name": _first_text(extra.get("workspace_name"), overview.get("workspace_name")),
+                    },
+                )
+            )
+    for token_key in ("id_token", "access_token"):
+        token = getattr(account, token_key, "") or (extra.get(token_key) if isinstance(extra, dict) else "")
+        payload = _parse_token_payload(token)
+        claims = _openai_auth_claims(payload)
+        raw_plan = _first_text(
+            claims.get("chatgpt_plan_type"),
+            claims.get("plan_type"),
+            claims.get("membership_type"),
+        )
+        if raw_plan:
+            candidates.append(
+                _candidate_details(
+                    _normalize_subscription_plan(raw_plan),
+                    raw=raw_plan,
+                    source_key=f"account.{token_key}",
+                )
+            )
+    return _pick_subscription_details(candidates)
+
+
+def _merge_subscription_details(*details: dict[str, Any] | None) -> dict[str, Any]:
+    return _pick_subscription_details([dict(item) for item in details if isinstance(item, dict)])
 
 
 def _fetch_usage_data(account, proxy: Optional[str] = None) -> dict:
@@ -9011,7 +9323,7 @@ def check_subscription_status(account: Account, proxy: Optional[str] = None) -> 
     检测账号当前订阅状态。
 
     Returns:
-        'free' / 'plus' / 'team'
+        'free' / 'plus' / 'team' / 'workspace'
     """
     return fetch_subscription_status_details(account, proxy=proxy)["status"]
 
@@ -9025,6 +9337,9 @@ def fetch_subscription_status_details(account: Account, proxy: Optional[str] = N
         "Authorization": f"Bearer {account.access_token}",
         "Content-Type": "application/json",
     }
+    chatgpt_account_id = _extract_chatgpt_account_id(account)
+    if chatgpt_account_id:
+        headers["Chatgpt-Account-Id"] = chatgpt_account_id
 
     try:
         resp = cffi_requests.get(
@@ -9038,12 +9353,22 @@ def fetch_subscription_status_details(account: Account, proxy: Optional[str] = N
         data = resp.json()
         if isinstance(data, dict):
             usage_data = None
+            usage_details = None
             try:
                 usage_data = _fetch_usage_data(account, proxy=proxy)
+                usage_details = _subscription_details_from_usage(usage_data)
             except Exception as usage_exc:
                 logger.info("check_subscription_status usage enrichment failed: %s", usage_exc)
+            token_details = _subscription_details_from_account_tokens(account)
+            status_details = _merge_subscription_details(
+                _subscription_details_from_me(data),
+                usage_details,
+                token_details,
+            )
+            if chatgpt_account_id:
+                status_details.setdefault("chatgpt_account_id", chatgpt_account_id)
             return {
-                "status": _subscription_status_from_me(data),
+                **status_details,
                 "source": "backend-api/me",
                 "me": data,
                 "usage": usage_data,
@@ -9052,8 +9377,12 @@ def fetch_subscription_status_details(account: Account, proxy: Optional[str] = N
         logger.info("check_subscription_status fallback to wham/usage: %s", exc)
 
     data = _fetch_usage_data(account, proxy=proxy)
+    token_details = _subscription_details_from_account_tokens(account)
+    status_details = _merge_subscription_details(_subscription_details_from_usage(data), token_details)
+    if chatgpt_account_id:
+        status_details.setdefault("chatgpt_account_id", chatgpt_account_id)
     return {
-        "status": _subscription_status_from_usage(data),
+        **status_details,
         "source": "backend-api/wham/usage",
         "me": None,
         "usage": data,
