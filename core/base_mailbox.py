@@ -116,6 +116,13 @@ class FallbackMailbox(BaseMailbox):
             before_ids=before_ids,
         )
 
+    def mark_cpa_export_success(self, account: MailboxAccount, **kwargs):
+        mailbox = self._resolve_mailbox(account)
+        marker = getattr(mailbox, "mark_cpa_export_success", None)
+        if callable(marker):
+            return marker(account, **kwargs)
+        return False
+
 
 def _extract_verification_link(text: str, keyword: str = "") -> str | None:
     combined = str(text or "")

@@ -9,6 +9,7 @@ class ConfigRepository:
         "default_executor",
         "default_identity_provider", "default_oauth_provider", "oauth_email_hint",
         "chrome_user_data_dir", "chrome_cdp_url",
+        "chatgpt_default_workspace_ids",
         "cpa_api_url", "cpa_api_key",
         "team_manager_url", "team_manager_key",
         "any2api_url", "any2api_password",

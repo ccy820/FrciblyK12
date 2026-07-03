@@ -135,8 +135,27 @@ def _is_gujumpgate_hotmail_header(parts: list[str]) -> bool:
     )
 
 
+def _looks_like_uuid(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            _safe_text(value),
+        )
+    )
+
+
 def _looks_like_gujumpgate_hotmail_row(parts: list[str]) -> bool:
-    return len(parts) == 4 and "@" in _safe_text(parts[0]) and bool(_safe_text(parts[2])) and bool(_safe_text(parts[3]))
+    if len(parts) < 4 or "@" not in _safe_text(parts[0]):
+        return False
+    client_id = _safe_text(parts[2])
+    refresh_token = _safe_text(parts[3])
+    if not client_id or not refresh_token:
+        return False
+    if len(parts) == 4:
+        return True
+    # Some exports append fields such as group labels after the refresh token:
+    # email----password----client_id----refresh_token--------默认分组
+    return _looks_like_uuid(client_id) or len(refresh_token) > 80
 
 
 def parse_local_ms_pool_rows(text: str) -> list[LocalMicrosoftMailboxEntry]:
@@ -272,7 +291,7 @@ class LocalMicrosoftMailboxPool(BaseMailbox):
         material = f"{self.pool_file}\n{self.pool_text}".encode("utf-8")
         return hashlib.sha256(material).hexdigest()[:16]
 
-    def _reserve(self, entry: LocalMicrosoftMailboxEntry) -> None:
+    def _mark_used(self, entry: LocalMicrosoftMailboxEntry, *, export_path: str = "") -> None:
         if self.allow_reuse:
             return
         state = self._state()
@@ -280,8 +299,11 @@ class LocalMicrosoftMailboxPool(BaseMailbox):
         used[entry.key] = {
             "email": entry.email,
             "reserved_at": datetime.now(timezone.utc).isoformat(),
+            "reason": "cpa_export_success",
             "source_id": self._source_id(),
         }
+        if export_path:
+            used[entry.key]["cpa_export_path"] = str(export_path)
         state["used"] = used
         self._save_state(state)
 
@@ -300,7 +322,6 @@ class LocalMicrosoftMailboxPool(BaseMailbox):
     def get_email(self) -> MailboxAccount:
         with self._lock:
             entry = self._available_entry()
-            self._reserve(entry)
 
         credentials = entry.credentials()
         credentials = {key: value for key, value in credentials.items() if value}
@@ -331,11 +352,17 @@ class LocalMicrosoftMailboxPool(BaseMailbox):
                     "metadata": {
                         "email": entry.email,
                         "source": entry.source_format,
-                        "reserved": not self.allow_reuse,
+                        "reserved": False,
                     },
                 },
             },
         )
+
+    def mark_cpa_export_success(self, account: MailboxAccount, *, export_path: str = "") -> bool:
+        entry = self._entry_for_account(account)
+        with self._lock:
+            self._mark_used(entry, export_path=export_path)
+        return True
 
     def _entry_for_account(self, account: MailboxAccount) -> LocalMicrosoftMailboxEntry:
         account_email = str(getattr(account, "email", "") or "").strip().lower()

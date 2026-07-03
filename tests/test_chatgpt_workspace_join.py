@@ -120,11 +120,18 @@ def test_workspace_join_flow_exports_cpa_and_returns_workspace_credentials(monke
     import platforms.chatgpt.workspace_join as workspace_join
 
     class FakeMailbox:
+        def __init__(self):
+            self.marked_exports = []
+
         def get_current_ids(self, _account):
             return set()
 
         def wait_for_link(self, *_args, **_kwargs):
             return "https://chatgpt.com/k12-invite?wId=workspace-1&aiId=invite-1"
+
+        def mark_cpa_export_success(self, account, *, export_path=""):
+            self.marked_exports.append((account, export_path))
+            return True
 
     monkeypatch.setattr(
         workspace_join,
@@ -153,11 +160,13 @@ def test_workspace_join_flow_exports_cpa_and_returns_workspace_credentials(monke
         raising=False,
     )
 
+    mailbox = FakeMailbox()
+    mailbox_account = object()
     result = run_workspace_join_flow(
         object(),
         {"access_token": "registration-access"},
-        mailbox=FakeMailbox(),
-        mailbox_account=object(),
+        mailbox=mailbox,
+        mailbox_account=mailbox_account,
         config={
             "workspace_ids": "workspace-1",
             "accept_invite": True,
@@ -171,17 +180,25 @@ def test_workspace_join_flow_exports_cpa_and_returns_workspace_credentials(monke
     assert result["session_token"] == "workspace-session"
     assert result["account_id"] == "workspace-account"
     assert result["workspace_join"]["cpa_export"]["path"].endswith("member.json")
+    assert mailbox.marked_exports == [(mailbox_account, str(tmp_path / "member.json"))]
 
 
 def test_workspace_join_flow_fails_when_cpa_export_fails(monkeypatch, tmp_path):
     import platforms.chatgpt.workspace_join as workspace_join
 
     class FakeMailbox:
+        def __init__(self):
+            self.marked_exports = []
+
         def get_current_ids(self, _account):
             return set()
 
         def wait_for_link(self, *_args, **_kwargs):
             return "https://chatgpt.com/k12-invite?wId=workspace-1&aiId=invite-1"
+
+        def mark_cpa_export_success(self, account, *, export_path=""):
+            self.marked_exports.append((account, export_path))
+            return True
 
     logs: list[str] = []
     monkeypatch.setattr(
@@ -205,10 +222,11 @@ def test_workspace_join_flow_fails_when_cpa_export_fails(monkeypatch, tmp_path):
         raising=False,
     )
 
+    mailbox = FakeMailbox()
     result = run_workspace_join_flow(
         object(),
         {"access_token": "registration-access"},
-        mailbox=FakeMailbox(),
+        mailbox=mailbox,
         mailbox_account=object(),
         config={
             "workspace_ids": "workspace-1",
@@ -227,4 +245,5 @@ def test_workspace_join_flow_fails_when_cpa_export_fails(monkeypatch, tmp_path):
         "ok": False,
         "error": "workspace switch failed",
     }
+    assert mailbox.marked_exports == []
     assert any("CPA JSON export failed" in item for item in logs)

@@ -6,15 +6,21 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from core.base_mailbox import MailboxAccount
+from core.config_store import config_store
 from .cpa_session import export_workspace_cpa_session_from_browser
 from .constants import CHATGPT_APP
 
 
 DEFAULT_WORKSPACE_IDS = "631e1603-06cf-4f0b-b79b-d09fbfcfe98d"
+WORKSPACE_IDS_CONFIG_KEY = "chatgpt_default_workspace_ids"
+
+
+def get_default_workspace_ids() -> str:
+    return str(config_store.get(WORKSPACE_IDS_CONFIG_KEY, DEFAULT_WORKSPACE_IDS) or "").strip() or DEFAULT_WORKSPACE_IDS
 
 
 def parse_workspace_ids(raw: Any) -> list[str]:
-    text = str(raw or "").strip() or DEFAULT_WORKSPACE_IDS
+    text = str(raw or "").strip() or get_default_workspace_ids()
     normalized = text.replace(",", "\n")
     return [item.strip() for item in normalized.splitlines() if item.strip()]
 
@@ -41,7 +47,7 @@ def workspace_join_enabled(extra: dict[str, Any] | None) -> bool:
 
 def workspace_join_config(extra: dict[str, Any] | None) -> dict[str, Any]:
     source = dict((extra or {}).get("chatgpt_workspace_join") or {})
-    source.setdefault("workspace_ids", (extra or {}).get("workspace_ids", DEFAULT_WORKSPACE_IDS))
+    source.setdefault("workspace_ids", (extra or {}).get("workspace_ids", get_default_workspace_ids()))
     source.setdefault("enabled", workspace_join_enabled(extra))
     source.setdefault("route", "request")
     source.setdefault("accept_invite", True)
@@ -425,6 +431,13 @@ def run_workspace_join_flow(
                 for key, value in export_result.items()
                 if key not in {"access_token", "refresh_token", "id_token", "session_token"}
             }
+            marker = getattr(mailbox, "mark_cpa_export_success", None)
+            if callable(marker) and mailbox_account is not None:
+                try:
+                    marker(mailbox_account, export_path=str(export_result.get("path") or ""))
+                    _log(log, "Workspace Join: CPA JSON 已导出，邮箱池状态已标记为已用")
+                except Exception as exc:
+                    _log(log, f"Workspace Join: 邮箱池状态标记失败（忽略）: {exc}")
             for source_key, target_key in (
                 ("access_token", "access_token"),
                 ("refresh_token", "refresh_token"),

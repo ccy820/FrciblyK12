@@ -161,6 +161,10 @@ const ZH_MESSAGES = {
   "settings.provider.smsUsage":
     "当平台需要手机号验证时，会按这里启用的接码 provider 创建临时号码并回填短信验证码。列表行内可以直接查看详情、编辑、设默认和删除。",
   "settings.chatgpt.cpaDesc": "注册完成后自动上传到 CPA 管理平台",
+  "settings.chatgpt.workspace.title": "默认 Workspace",
+  "settings.chatgpt.workspace.desc":
+    "ChatGPT 注册弹窗会默认使用这里保存的 Workspace IDs；多 ID 可换行或用英文逗号分隔。",
+  "settings.chatgpt.workspace.ids": "默认 Workspace IDs",
   "settings.chatgpt.teamManagerDesc": "上传到自建 Team Manager 系统",
   "settings.chatgpt.any2apiDesc": "同步账号到 Any2Api 服务，用于导出和对接",
 
@@ -612,6 +616,10 @@ const EN_MESSAGES: Record<TranslationKey, string> = {
     "When a platform requires phone verification, enabled SMS providers create temporary numbers and read SMS codes. Rows support details, editing, default selection, and deletion.",
   "settings.chatgpt.cpaDesc":
     "Automatically upload accounts to the CPA management platform after registration",
+  "settings.chatgpt.workspace.title": "Default Workspace",
+  "settings.chatgpt.workspace.desc":
+    "The ChatGPT registration dialog uses these saved Workspace IDs by default. Use new lines or commas for multiple IDs.",
+  "settings.chatgpt.workspace.ids": "Default Workspace IDs",
   "settings.chatgpt.teamManagerDesc":
     "Upload accounts to a self-hosted Team Manager system",
   "settings.chatgpt.any2apiDesc":

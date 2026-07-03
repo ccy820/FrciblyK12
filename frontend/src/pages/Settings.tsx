@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import ProviderCards from '@/components/settings/ProviderCards'
 
 const PROVIDER_TYPES = ['mailbox', 'captcha', 'sms'] as const
+const DEFAULT_CHATGPT_WORKSPACE_IDS = '631e1603-06cf-4f0b-b79b-d09fbfcfe98d'
 
 type ProviderType = typeof PROVIDER_TYPES[number]
 
@@ -317,7 +318,7 @@ const TABS: { id: string; label: string; icon: any; sections?: any[] }[] = [
 ]
 
 function Field({ field, form, setForm, showSecret, setShowSecret, selectOptions }: any) {
-  const { key, label, placeholder, secret } = field
+  const { key, label, placeholder, secret, type } = field
   const options = (field.options && field.options.length > 0)
     ? field.options
     : ((selectOptions && selectOptions.length > 0) ? selectOptions : null)
@@ -333,6 +334,14 @@ function Field({ field, form, setForm, showSecret, setShowSecret, selectOptions 
           >
             {options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+        ) : type === 'textarea' ? (
+          <textarea
+            value={form[key] || ''}
+            onChange={e => setForm((f: any) => ({ ...f, [key]: e.target.value }))}
+            placeholder={placeholder}
+            rows={4}
+            className="control-surface min-h-24 resize-y font-mono text-xs"
+          />
         ) : (
           <>
             <input
@@ -938,6 +947,17 @@ export default function Settings({ embedded, defaultTab }: { embedded?: boolean;
           items: [
             { key: 'cpa_api_url', label: 'API URL', placeholder: 'https://your-cpa.example.com' },
             { key: 'cpa_api_key', label: 'API Key', secret: true },
+          ],
+        }, {
+          section: t('settings.chatgpt.workspace.title'),
+          desc: t('settings.chatgpt.workspace.desc'),
+          items: [
+            {
+              key: 'chatgpt_default_workspace_ids',
+              label: t('settings.chatgpt.workspace.ids'),
+              placeholder: DEFAULT_CHATGPT_WORKSPACE_IDS,
+              type: 'textarea',
+            },
           ],
         }, {
           section: 'Team Manager',

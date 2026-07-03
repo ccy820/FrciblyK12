@@ -34,6 +34,7 @@ const BROWSER_MODE_OPTIONS = [
 
 const ACCOUNT_TOOL_BUTTON_CLASS = 'h-8 shrink-0 whitespace-nowrap bg-transparent'
 const DEFAULT_CHATGPT_WORKSPACE_IDS = '631e1603-06cf-4f0b-b79b-d09fbfcfe98d'
+const CHATGPT_WORKSPACE_IDS_CONFIG_KEY = 'chatgpt_default_workspace_ids'
 
 function getAccountOverview(acc: any) {
   return acc?.overview || {}
@@ -260,7 +261,9 @@ function RegisterModal({
     ])
       .then(([cfg, options]) => {
         if (!active) return
-        setConfig(cfg || {})
+        const nextConfig = cfg || {}
+        setConfig(nextConfig)
+        setChatgptWorkspaceIds(String(nextConfig[CHATGPT_WORKSPACE_IDS_CONFIG_KEY] || DEFAULT_CHATGPT_WORKSPACE_IDS))
         if (options) {
           setConfigOptions(options)
         }

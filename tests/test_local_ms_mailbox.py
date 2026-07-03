@@ -1,3 +1,5 @@
+import json
+
 from core.base_mailbox import MailboxAccount
 from core.local_ms_mailbox import LocalMicrosoftMailboxPool, parse_local_ms_pool_rows
 
@@ -24,6 +26,23 @@ def test_parse_local_ms_pool_rows_accepts_gujumpgate_hotmail_format():
     assert entry.imap_ready is False
 
 
+def test_parse_local_ms_pool_rows_accepts_gujumpgate_row_with_group_suffix():
+    rows = parse_local_ms_pool_rows(
+        "user@example.com----mail-pass----9e5f94bc-e8a4-4e73-b8be-63364c29d753"
+        "----M.C541_BAY.0.U.Msarestofrefresh$$--------默认分组"
+    )
+
+    assert len(rows) == 1
+    entry = rows[0]
+    assert entry.email == "user@example.com"
+    assert entry.password == "mail-pass"
+    assert entry.client_id == "9e5f94bc-e8a4-4e73-b8be-63364c29d753"
+    assert entry.refresh_token == "M.C541_BAY.0.U.Msarestofrefresh$$"
+    assert entry.source_format == "gujumpgate_hotmail"
+    assert entry.graph_ready is True
+    assert entry.imap_ready is False
+
+
 def test_local_ms_pool_records_gujumpgate_source_metadata(tmp_path):
     pool = LocalMicrosoftMailboxPool(
         pool_text="user@example.com----mail-pass----client-id-123----refresh-token-456",
@@ -38,6 +57,26 @@ def test_local_ms_pool_records_gujumpgate_source_metadata(tmp_path):
     assert provider_account["credentials"]["refresh_token"] == "refresh-token-456"
     assert provider_account["metadata"]["source"] == "gujumpgate_hotmail"
     assert provider_resource["metadata"]["source"] == "gujumpgate_hotmail"
+
+
+def test_local_ms_pool_marks_used_only_after_cpa_export(tmp_path):
+    state_file = tmp_path / "state.json"
+    pool = LocalMicrosoftMailboxPool(
+        pool_text="user@example.com----mail-pass----client-id-123----refresh-token-456",
+        state_file=str(state_file),
+    )
+
+    account = pool.get_email()
+
+    assert not state_file.exists()
+
+    assert pool.mark_cpa_export_success(account, export_path=str(tmp_path / "member.json")) is True
+
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    used = state["used"]["user@example.com"]
+    assert used["email"] == "user@example.com"
+    assert used["reason"] == "cpa_export_success"
+    assert used["cpa_export_path"].endswith("member.json")
 
 
 def test_graph_access_token_tries_fallback_endpoint(monkeypatch):
