@@ -276,6 +276,57 @@ def test_browser_registration_flow_starts_from_chatgpt_nextauth(monkeypatch):
     assert state["page_type"] == "oauth_callback"
 
 
+def test_browser_registration_flow_resumes_existing_login_after_auth_error(monkeypatch):
+    calls = {}
+    logs = []
+
+    class FakePage:
+        url = "about:blank"
+        context = SimpleNamespace(cookies=lambda: [
+            {"name": "login_session", "value": "yes"},
+            {"name": "oai-did", "value": "did_123"},
+        ])
+
+        def evaluate(self, script, *args):
+            return "Mozilla/5.0"
+
+        def query_selector(self, _selector):
+            return None
+
+    def start_via_authorize(page, email, device_id, log):
+        calls["authorize"] = (email, device_id)
+        page.url = (
+            "https://auth.openai.com/error?"
+            "payload=eyJraW5kIjoiQXV0aEFwaUZhaWx1cmUiLCJlcnJvckNvZGUiOiJyYXRlX2xpbWl0X2V4Y2VlZGVkIn0"
+        )
+        return {"page_type": "auth_error", "current_url": page.url}
+
+    def goto_with_retry(page, url, **_kwargs):
+        calls.setdefault("goto", []).append(url)
+        page.url = url
+
+    monkeypatch.setattr(browser_register_module, "_seed_browser_device_id", lambda page, device_id: calls.setdefault("seed", device_id))
+    monkeypatch.setattr(browser_register_module, "_start_browser_signup_via_authorize", start_via_authorize)
+    monkeypatch.setattr(browser_register_module, "_goto_with_retry", goto_with_retry)
+    monkeypatch.setattr(browser_register_module, "_handle_post_signup_onboarding", lambda page, log: calls.setdefault("onboarding", True))
+
+    state = browser_register_module._browser_registration_flow(
+        FakePage(),
+        "registered@example.com",
+        "Secret123!",
+        otp_callback=None,
+        phone_callback=None,
+        log=logs.append,
+    )
+
+    assert calls["authorize"][0] == "registered@example.com"
+    assert calls["authorize"][1] == calls["seed"]
+    assert calls["goto"] == ["https://chatgpt.com/"]
+    assert calls["onboarding"] is True
+    assert state["page_type"] == "chatgpt_home"
+    assert any("已注册账号" in item for item in logs)
+
+
 def test_browser_register_run_returns_after_registration_without_codex_oauth(monkeypatch):
     class FakePage:
         def __init__(self):

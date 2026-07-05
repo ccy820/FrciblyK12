@@ -1943,6 +1943,8 @@ def _infer_page_type(data: dict | None, current_url: str = "") -> str:
         return "organization_selection"
     if "add-phone" in url:
         return "add_phone"
+    if "auth.openai.com/error" in url:
+        return "auth_error"
     if "/api/oauth/oauth2/auth" in url:
         return "external_url"
     if "chatgpt.com" in url:
@@ -3171,6 +3173,39 @@ def _requires_registration_navigation(state: dict) -> bool:
     continue_url = str(state.get("continue_url") or "")
     current_url = str(state.get("current_url") or "")
     return bool(continue_url and continue_url != current_url)
+
+
+def _is_auth_error_state(state: dict) -> bool:
+    page_type = str(state.get("page_type") or "")
+    target = f"{state.get('continue_url') or ''} {state.get('current_url') or ''}".lower()
+    return page_type == "auth_error" or "auth.openai.com/error" in target
+
+
+def _resume_chatgpt_from_authenticated_auth_error(page, state: dict, log) -> dict | None:
+    if not _is_auth_error_state(state):
+        return None
+    cookies = _get_cookies(page)
+    if not (
+        cookies.get("login_session")
+        or cookies.get("__Secure-next-auth.session-token")
+        or cookies.get("next-auth.session-token")
+    ):
+        return None
+
+    log("Auth error 页已检测到登录态 cookie，按已注册账号登录完成继续打开 ChatGPT 首页")
+    try:
+        _goto_with_retry(page, f"{CHATGPT_APP}/", wait_until="domcontentloaded", timeout=30000, log=log)
+    except Exception as exc:
+        log(f"已登录态续接 ChatGPT 首页失败: {exc}")
+        return None
+
+    resumed_state = _derive_registration_state_from_page(page)
+    if resumed_state.get("page_type"):
+        return resumed_state
+    current_url = str(getattr(page, "url", "") or "")
+    if "chatgpt.com" in current_url.lower():
+        return _build_manual_flow_state("chatgpt_home", current_url)
+    return None
 
 
 def _browser_add_cookies(page, cookies: list[dict]) -> None:
@@ -4669,6 +4704,11 @@ def _browser_registration_flow(page, email: str, password: str, otp_callback, ph
                 raise RuntimeError("缺少可跟随的 continue_url")
             _goto_with_retry(page, target_url, wait_until="domcontentloaded", timeout=30000, log=log)
             state = _extract_flow_state(None, page.url)
+            continue
+
+        resumed_state = _resume_chatgpt_from_authenticated_auth_error(page, state, log)
+        if resumed_state:
+            state = resumed_state
             continue
 
         raise RuntimeError(f"未支持的注册状态: page={state.get('page_type') or '-'}")
